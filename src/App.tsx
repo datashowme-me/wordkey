@@ -1,0 +1,494 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Header } from './components/Header';
+import { WordTypingBoard } from './components/WordTypingBoard';
+import { StatsFooter } from './components/StatsFooter';
+import { ArticleImportModal } from './components/ArticleImportModal';
+import { SettingsModal } from './components/SettingsModal';
+import { ShortcutsModal } from './components/ShortcutsModal';
+import { CompletionModal } from './components/CompletionModal';
+import { TaskMilestoneModal } from './components/TaskMilestoneModal';
+import { TrendModal } from './components/TrendModal';
+import { WordItem, UserSettings, TypingStats, TaskProgressPoint } from './types';
+import { SAMPLE_ARTICLES } from './data/fallbackData';
+import { loadOfficialDictionary } from './utils/dictionaryLoader';
+
+export default function App() {
+  // Initialize with the Oxford sample (matching user's screenshot)
+  const defaultArticle = SAMPLE_ARTICLES[0];
+  const [allWords, setAllWords] = useState<WordItem[]>(defaultArticle.words);
+  const [articleTitle, setArticleTitle] = useState<string>(defaultArticle.title);
+
+  // Progress history for accuracy trend visualization
+  const [taskProgressHistory, setTaskProgressHistory] = useState<TaskProgressPoint[]>([]);
+  const [sessionProgressHistory, setSessionProgressHistory] = useState<TaskProgressPoint[]>([]);
+
+  // User Settings
+  const [settings, setSettings] = useState<UserSettings>(() => {
+    return {
+      accent: 'us', // 美音 (AmE) by default like screenshot
+      dictationMode: false,
+      autoPlayAudio: true,
+      keySound: true,
+      showMeaning: true,
+      showPhonetic: true,
+      wordFilter: 'all',
+      theme: 'light',
+      taskSize: 20, // 默认每组 20 词小任务
+    };
+  });
+
+  const taskSize = settings.taskSize || 20;
+
+  // Task & chapter pagination state
+  const [currentTaskIndex, setCurrentTaskIndex] = useState<number>(0);
+  const [taskWordIndex, setTaskWordIndex] = useState<number>(1); // Match screenshot on word 2 "clothes"
+
+  // Modals state
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isTaskMilestoneOpen, setIsTaskMilestoneOpen] = useState<boolean>(false);
+  const [isComplete, setIsComplete] = useState<boolean>(false);
+  const [isImportOpen, setIsImportOpen] = useState<boolean>(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
+  const [isTrendModalOpen, setIsTrendModalOpen] = useState<boolean>(false);
+
+  // Mistaken words
+  const [allMistakenWords, setAllMistakenWords] = useState<WordItem[]>([]);
+  const [taskMistakes, setTaskMistakes] = useState<WordItem[]>([]);
+
+  // Task calculation
+  const totalTasks = useMemo(() => {
+    return Math.max(1, Math.ceil(allWords.length / taskSize));
+  }, [allWords.length, taskSize]);
+
+  // Current task words slice (e.g. 20 words)
+  const currentTaskWords = useMemo(() => {
+    const start = currentTaskIndex * taskSize;
+    const end = start + taskSize;
+    return allWords.slice(start, end);
+  }, [allWords, currentTaskIndex, taskSize]);
+
+  // Typing Statistics
+  const [stats, setStats] = useState<TypingStats>({
+    elapsedSeconds: 14,
+    totalKeystrokes: 22,
+    correctKeystrokes: 20,
+    wrongKeystrokes: 2,
+    correctWords: 1,
+    wrongWords: 0,
+    wpm: 13,
+    accuracy: 91,
+  });
+
+  // Sync theme with document element
+  useEffect(() => {
+    if (settings.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [settings.theme]);
+
+  // Load the full authentic Oxford 5000 dictionary (5,836 words) on initial mount
+  useEffect(() => {
+    loadOfficialDictionary('oxford5000')
+      .then((data) => {
+        if (data && data.words && data.words.length > 0) {
+          setAllWords(data.words);
+          setArticleTitle(data.title || '牛津 5000 核心词库 (完整版)');
+          setCurrentTaskIndex(0);
+          setTaskWordIndex(0);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load Oxford5000 on mount:', err);
+      });
+  }, []);
+
+  // Global key for Pause (Escape) or Shift (toggle accent)
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      // Don't intercept when inside modal or inputs
+      if (
+        isImportOpen ||
+        isSettingsOpen ||
+        isShortcutsOpen ||
+        isComplete ||
+        isTaskMilestoneOpen
+      ) {
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setIsPaused((prev) => !prev);
+      } else if (e.key === 'Shift' && !e.repeat) {
+        // Toggle accent between AmE and BrE
+        setSettings((prev) => ({
+          ...prev,
+          accent: prev.accent === 'us' ? 'uk' : 'us',
+        }));
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, [
+    isImportOpen,
+    isSettingsOpen,
+    isShortcutsOpen,
+    isComplete,
+    isTaskMilestoneOpen,
+  ]);
+
+  // Timer loop
+  useEffect(() => {
+    if (isPaused || isComplete || isTaskMilestoneOpen) return;
+
+    const interval = setInterval(() => {
+      setStats((prev) => {
+        const nextSeconds = prev.elapsedSeconds + 1;
+        const minutes = nextSeconds / 60;
+        const wpm = minutes > 0 ? Math.round(prev.correctKeystrokes / 5 / minutes) : 0;
+        const total = prev.correctKeystrokes + prev.wrongKeystrokes;
+        const accuracy = total > 0 ? Math.round((prev.correctKeystrokes / total) * 100) : 100;
+
+        return {
+          ...prev,
+          elapsedSeconds: nextSeconds,
+          wpm: Math.max(0, wpm),
+          accuracy: Math.min(100, Math.max(0, accuracy)),
+        };
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isPaused, isComplete, isTaskMilestoneOpen]);
+
+  // Keystroke recording
+  const handleRecordKeystroke = useCallback((isCorrect: boolean) => {
+    setStats((prev) => {
+      const nextTotal = prev.totalKeystrokes + 1;
+      const nextCorrect = prev.correctKeystrokes + (isCorrect ? 1 : 0);
+      const nextWrong = prev.wrongKeystrokes + (isCorrect ? 0 : 1);
+      const accuracy = nextTotal > 0 ? Math.round((nextCorrect / nextTotal) * 100) : 100;
+      const minutes = Math.max(prev.elapsedSeconds, 1) / 60;
+      const wpm = Math.round(nextCorrect / 5 / minutes);
+
+      return {
+        ...prev,
+        totalKeystrokes: nextTotal,
+        correctKeystrokes: nextCorrect,
+        wrongKeystrokes: nextWrong,
+        accuracy,
+        wpm,
+      };
+    });
+  }, []);
+
+  // Single Word Completed within current task
+  const handleWordComplete = useCallback(
+    (completedWord: WordItem, mistakesCount: number) => {
+      if (mistakesCount > 0) {
+        setAllMistakenWords((prev) => {
+          if (!prev.some((w) => w.id === completedWord.id)) {
+            return [...prev, completedWord];
+          }
+          return prev;
+        });
+        setTaskMistakes((prev) => {
+          if (!prev.some((w) => w.id === completedWord.id)) {
+            return [...prev, completedWord];
+          }
+          return prev;
+        });
+      }
+
+      setStats((prev) => {
+        const nextCorrectWords = prev.correctWords + 1;
+        const currentAcc = prev.accuracy;
+        const currentWpm = prev.wpm;
+        const wordTotal = completedWord.word.length + mistakesCount;
+        const wordAcc = wordTotal > 0 ? Math.round((completedWord.word.length / wordTotal) * 100) : 100;
+
+        const newPoint: TaskProgressPoint = {
+          index: taskWordIndex + 1,
+          word: completedWord.word,
+          cumulativeAccuracy: currentAcc,
+          wordAccuracy: wordAcc,
+          wpm: currentWpm,
+          mistakes: mistakesCount,
+        };
+
+        setTaskProgressHistory((th) => [...th, newPoint]);
+        setSessionProgressHistory((sh) => [...sh, newPoint]);
+
+        return {
+          ...prev,
+          correctWords: nextCorrectWords,
+        };
+      });
+
+      // Check if current task is done
+      if (taskWordIndex + 1 < currentTaskWords.length) {
+        setTaskWordIndex((prev) => prev + 1);
+      } else {
+        // Current 20-word task completed!
+        if (currentTaskIndex + 1 < totalTasks) {
+          setIsTaskMilestoneOpen(true);
+        } else {
+          // All tasks in the entire article completed!
+          setIsComplete(true);
+        }
+      }
+    },
+    [taskWordIndex, currentTaskWords.length, currentTaskIndex, totalTasks]
+  );
+
+  // Navigation within current task
+  const handleNavigatePrev = () => {
+    if (taskWordIndex > 0) {
+      setTaskWordIndex((prev) => prev - 1);
+    }
+  };
+
+  const handleNavigateNext = () => {
+    if (taskWordIndex + 1 < currentTaskWords.length) {
+      setTaskWordIndex((prev) => prev + 1);
+    } else {
+      if (currentTaskIndex + 1 < totalTasks) {
+        setIsTaskMilestoneOpen(true);
+      } else {
+        setIsComplete(true);
+      }
+    }
+  };
+
+  // Jump to specific task group (e.g. 第 2 组)
+  const handleSelectTask = (taskIdx: number) => {
+    if (taskIdx >= 0 && taskIdx < totalTasks) {
+      setCurrentTaskIndex(taskIdx);
+      setTaskWordIndex(0);
+      setTaskMistakes([]);
+      setTaskProgressHistory([]);
+      setIsTaskMilestoneOpen(false);
+    }
+  };
+
+  // Move to next task group
+  const handleNextTask = () => {
+    setIsTaskMilestoneOpen(false);
+    if (currentTaskIndex + 1 < totalTasks) {
+      setCurrentTaskIndex((prev) => prev + 1);
+      setTaskWordIndex(0);
+      setTaskMistakes([]);
+      setTaskProgressHistory([]);
+    } else {
+      setIsComplete(true);
+    }
+  };
+
+  // Repeat current task group
+  const handleRepeatTask = () => {
+    setIsTaskMilestoneOpen(false);
+    setTaskWordIndex(0);
+    setTaskMistakes([]);
+    setTaskProgressHistory([]);
+  };
+
+  // Reset entire article progress
+  const handleResetProgress = () => {
+    setCurrentTaskIndex(0);
+    setTaskWordIndex(0);
+    setAllMistakenWords([]);
+    setTaskMistakes([]);
+    setTaskProgressHistory([]);
+    setSessionProgressHistory([]);
+    setIsComplete(false);
+    setIsTaskMilestoneOpen(false);
+    setStats({
+      elapsedSeconds: 0,
+      totalKeystrokes: 0,
+      correctKeystrokes: 0,
+      wrongKeystrokes: 0,
+      correctWords: 0,
+      wrongWords: 0,
+      wpm: 0,
+      accuracy: 100,
+    });
+  };
+
+  // Shuffle current task words
+  const handleShuffleWords = () => {
+    const shuffledTask = [...currentTaskWords].sort(() => Math.random() - 0.5);
+    const newAllWords = [...allWords];
+    const start = currentTaskIndex * taskSize;
+    newAllWords.splice(start, currentTaskWords.length, ...shuffledTask);
+    setAllWords(newAllWords);
+    setTaskWordIndex(0);
+    setTaskProgressHistory([]);
+  };
+
+  // Import new words from article URL or text
+  const handleImportWords = (newWords: WordItem[], title: string) => {
+    setAllWords(newWords);
+    setArticleTitle(title);
+    setCurrentTaskIndex(0);
+    setTaskWordIndex(0);
+    setAllMistakenWords([]);
+    setTaskMistakes([]);
+    setTaskProgressHistory([]);
+    setSessionProgressHistory([]);
+    setIsComplete(false);
+    setIsTaskMilestoneOpen(false);
+    setStats({
+      elapsedSeconds: 0,
+      totalKeystrokes: 0,
+      correctKeystrokes: 0,
+      wrongKeystrokes: 0,
+      correctWords: 0,
+      wrongWords: 0,
+      wpm: 0,
+      accuracy: 100,
+    });
+  };
+
+  // Review mistaken words
+  const handleReviewMistakes = () => {
+    if (allMistakenWords.length > 0) {
+      setAllWords([...allMistakenWords]);
+      setArticleTitle(`错词专项强化 (${allMistakenWords.length}词)`);
+      setCurrentTaskIndex(0);
+      setTaskWordIndex(0);
+      setAllMistakenWords([]);
+      setTaskMistakes([]);
+      setIsComplete(false);
+      setIsTaskMilestoneOpen(false);
+      setStats({
+        elapsedSeconds: 0,
+        totalKeystrokes: 0,
+        correctKeystrokes: 0,
+        wrongKeystrokes: 0,
+        correctWords: 0,
+        wrongWords: 0,
+        wpm: 0,
+        accuracy: 100,
+      });
+    }
+  };
+
+  const currentWord = currentTaskWords[taskWordIndex] || null;
+  const prevWord = taskWordIndex > 0 ? currentTaskWords[taskWordIndex - 1] : null;
+  const nextWord = taskWordIndex + 1 < currentTaskWords.length ? currentTaskWords[taskWordIndex + 1] : null;
+
+  return (
+    <div className="min-h-screen flex flex-col justify-between bg-[#f4f6fa] dark:bg-[#121620] text-slate-800 dark:text-slate-100 transition-colors duration-200">
+      {/* Top Header Capsule Bar (Screenshot Style) */}
+      <Header
+        articleTitle={articleTitle}
+        currentIndex={taskWordIndex}
+        totalTaskWords={currentTaskWords.length}
+        currentTaskIndex={currentTaskIndex}
+        totalTasks={totalTasks}
+        taskSize={taskSize}
+        totalArticleWords={allWords.length}
+        settings={settings}
+        isPaused={isPaused}
+        onUpdateSettings={setSettings}
+        onTogglePause={() => setIsPaused((prev) => !prev)}
+        onOpenImport={() => setIsImportOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        onResetProgress={handleResetProgress}
+        onShuffleWords={handleShuffleWords}
+        onSelectTask={handleSelectTask}
+      />
+
+      {/* Main Typing Center Board (Screenshot Layout) */}
+      <main className="flex-1 flex flex-col justify-center">
+        <WordTypingBoard
+          currentWord={currentWord}
+          prevWord={prevWord}
+          nextWord={nextWord}
+          settings={settings}
+          isPaused={isPaused}
+          onWordComplete={handleWordComplete}
+          onRecordKeystroke={handleRecordKeystroke}
+          onNavigatePrev={handleNavigatePrev}
+          onNavigateNext={handleNavigateNext}
+          onToggleAccent={() =>
+            setSettings((prev) => ({
+              ...prev,
+              accent: prev.accent === 'us' ? 'uk' : 'us',
+            }))
+          }
+        />
+      </main>
+
+      {/* Bottom Floating Stats Dashboard Card (Screenshot Layout) */}
+      <StatsFooter stats={stats} onOpenTrend={() => setIsTrendModalOpen(true)} />
+
+      {/* Modals */}
+      <ArticleImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImportWords={handleImportWords}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={settings}
+        onUpdateSettings={setSettings}
+      />
+
+      <ShortcutsModal
+        isOpen={isShortcutsOpen}
+        onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      {/* Real-time Trend Modal (can be opened anytime from footer) */}
+      <TrendModal
+        isOpen={isTrendModalOpen}
+        taskData={taskProgressHistory}
+        sessionData={sessionProgressHistory}
+        currentTaskNum={currentTaskIndex + 1}
+        onClose={() => setIsTrendModalOpen(false)}
+      />
+
+      {/* Milestone Modal after completing a 20-word small task */}
+      <TaskMilestoneModal
+        isOpen={isTaskMilestoneOpen}
+        currentTaskIndex={currentTaskIndex}
+        totalTasks={totalTasks}
+        taskSize={taskSize}
+        totalArticleWords={allWords.length}
+        stats={stats}
+        taskMistakes={taskMistakes}
+        taskProgressHistory={taskProgressHistory}
+        onNextTask={handleNextTask}
+        onRepeatTask={handleRepeatTask}
+      />
+
+      {/* Full Article Completed Modal */}
+      <CompletionModal
+        isOpen={isComplete}
+        stats={stats}
+        mistakenWords={allMistakenWords}
+        sessionProgressHistory={sessionProgressHistory}
+        articleTitle={articleTitle}
+        onRestart={handleResetProgress}
+        onReviewMistakes={handleReviewMistakes}
+        onOpenImport={() => {
+          setIsComplete(false);
+          setIsImportOpen(true);
+        }}
+      />
+    </div>
+  );
+}
