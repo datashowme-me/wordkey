@@ -43,6 +43,13 @@ export interface TaskProgressPoint {
   mistakes: number; // 错键次数
 }
 
+export interface DictEntry {
+  phoneticAmE: string;
+  phoneticBrE: string;
+  pos: string;
+  meaning: string;
+}
+
 export interface UserSettings {
   accent: AccentType; // 'us' | 'uk'
   dictationMode: boolean; // 默写模式: hides word spelling

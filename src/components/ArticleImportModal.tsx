@@ -12,8 +12,9 @@ import {
   Check,
 } from 'lucide-react';
 import { SAMPLE_ARTICLES, SAMPLE_CATEGORIES } from '../data/fallbackData';
-import { WordItem, ExtractionMode } from '../types';
+import { WordItem, ExtractionMode, DictEntry } from '../types';
 import { loadOfficialDictionary } from '../utils/dictionaryLoader';
+import { tokenizeArticle, fetchWordAnnotation } from '../utils/articleParser';
 
 interface ArticleImportModalProps {
   isOpen: boolean;
@@ -147,7 +148,15 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
 
       setLoadingStep('正在提取文章全部单词并匹配美音/英音发音与释义...');
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          '当前环境网页抓取接口未响应，建议复制网页文章内容后，直接切换到「粘贴文章文本」模式进行解析！'
+        );
+      }
 
       if (!response.ok) {
         throw new Error(data.error || '解析文章失败');
@@ -180,31 +189,76 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
     setLoadingStep('正在提取全文单词并生成美音/英音音标与释义...');
 
     try {
-      const response = await fetch('/api/parse-article', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: textInput.trim(),
-          title: titleInput.trim() || '自定义文章',
+      let success = false;
+      try {
+        const response = await fetch('/api/parse-article', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: textInput.trim(),
+            title: titleInput.trim() || '自定义文章',
+            mode,
+            includeStopWords,
+            order,
+            maxWords: extractAll ? 0 : maxWordsCount,
+          }),
+        });
+
+        const resText = await response.text();
+        const data = JSON.parse(resText);
+        if (response.ok && data.words && data.words.length > 0) {
+          onImportWords(data.words, data.title || '自定义文章');
+          onClose();
+          success = true;
+        }
+      } catch {
+        // Fallback to client-side tokenizer
+      }
+
+      if (!success) {
+        // Browser client-side parsing fallback
+        const tokens = tokenizeArticle(textInput.trim(), {
           mode,
           includeStopWords,
           order,
           maxWords: extractAll ? 0 : maxWordsCount,
-        }),
-      });
+        });
 
-      const data = await response.json();
+        if (tokens.length === 0) {
+          throw new Error('未能从文本中提取到有效单词');
+        }
 
-      if (!response.ok) {
-        throw new Error(data.error || '解析文章失败');
+        const uniqueWords = Array.from(new Set(tokens.map((t) => t.word.toLowerCase())));
+        const annotationMap = new Map<string, DictEntry>();
+
+        const batchSize = 8;
+        for (let i = 0; i < Math.min(uniqueWords.length, 60); i += batchSize) {
+          const chunk = uniqueWords.slice(i, i + batchSize);
+          await Promise.all(
+            chunk.map(async (w) => {
+              const entry = await fetchWordAnnotation(w);
+              if (entry) annotationMap.set(w, entry);
+            })
+          );
+        }
+
+        const words: WordItem[] = tokens.map((token, idx) => {
+          const entry = annotationMap.get(token.word.toLowerCase());
+          return {
+            id: `client-word-${idx}-${token.word}`,
+            word: token.word,
+            phoneticAmE: entry?.phoneticAmE || `[${token.word}]`,
+            phoneticBrE: entry?.phoneticBrE || `[${token.word}]`,
+            pos: entry?.pos || 'n./v.',
+            meaning: entry?.meaning || '核心词汇',
+            sentence: token.sentence,
+            frequency: 1,
+          };
+        });
+
+        onImportWords(words, titleInput.trim() || '自定义文章');
+        onClose();
       }
-
-      if (!data.words || data.words.length === 0) {
-        throw new Error('未能提取到有效单词');
-      }
-
-      onImportWords(data.words, data.title || '自定义文章');
-      onClose();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '解析文章失败';
       setErrorMessage(msg);

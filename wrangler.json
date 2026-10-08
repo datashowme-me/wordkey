@@ -1,5 +1,6 @@
 {
   "name": "wordkey",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
   "assets": {
     "directory": "./dist",
