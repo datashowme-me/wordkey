@@ -426,7 +426,9 @@ app.post('/api/generate-vocab-pack', async (req: Request, res: Response) => {
 
     const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
-      return res.status(400).json({ error: '需要配置 DEEPSEEK_API_KEY 才能动态生成拓展词库' });
+      return res.status(400).json({
+        error: '需要配置 DEEPSEEK_API_KEY 才能动态生成拓展词库。请在根目录 .env 文件中添加 DEEPSEEK_API_KEY=sk-xxxx',
+      });
     }
 
     const prompt = `你是一个顶级英语教学专家与词汇学导师。用户希望系统化拓展词汇量。
@@ -458,7 +460,7 @@ app.post('/api/generate-vocab-pack', async (req: Request, res: Response) => {
     );
     const wordsList = (parsed.words || []).map((item: any, idx: number) => ({
       id: `ai-pack-${Date.now()}-${idx}-${item.word}`,
-      word: String(item.word || '').toLowerCase().trim().replace(/[^a-z]/g, ''),
+      word: String(item.word || '').toLowerCase().trim().replace(/[^a-z\s-]/g, '').replace(/^-+|-+$/g, ''),
       phoneticAmE: item.phoneticAmE || `[${item.word}]`,
       phoneticBrE: item.phoneticBrE || item.phoneticAmE || `[${item.word}]`,
       pos: item.pos || 'n.',

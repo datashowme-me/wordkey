@@ -192,7 +192,9 @@ export default {
         const apiKey = env.DEEPSEEK_API_KEY;
         if (!apiKey) {
           return new Response(
-            JSON.stringify({ error: '未配置 DEEPSEEK_API_KEY，请在 Cloudflare 环境变量中添加 DEEPSEEK_API_KEY' }),
+            JSON.stringify({
+              error: '未配置 DEEPSEEK_API_KEY。请在 Cloudflare 控制台 (Workers & Pages > Settings > Variables and Secrets) 添加 DEEPSEEK_API_KEY',
+            }),
             { status: 400, headers: { 'Content-Type': 'application/json' } }
           );
         }
@@ -227,7 +229,7 @@ export default {
 
         const wordsList = (parsed.words || []).map((item: any, idx: number) => ({
           id: `ai-pack-${Date.now()}-${idx}-${item.word}`,
-          word: String(item.word || '').toLowerCase().trim().replace(/[^a-z]/g, ''),
+          word: String(item.word || '').toLowerCase().trim().replace(/[^a-z\s-]/g, '').replace(/^-+|-+$/g, ''),
           phoneticAmE: item.phoneticAmE || `[${item.word}]`,
           phoneticBrE: item.phoneticBrE || item.phoneticAmE || `[${item.word}]`,
           pos: item.pos || 'n.',

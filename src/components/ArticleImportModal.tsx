@@ -511,6 +511,10 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
                   </>
                 )}
               </button>
+
+              <div className="text-[11px] text-slate-400 dark:text-slate-500 text-center flex items-center justify-center gap-1">
+                <span>💡 由 DeepSeek AI 智能驱动，自动配备英/美音标、精准备注与双语例句</span>
+              </div>
             </form>
           )}
 
