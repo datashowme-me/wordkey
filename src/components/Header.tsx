@@ -16,6 +16,8 @@ import {
   Sparkles,
   ChevronDown,
   Layers,
+  BookMarked,
+  ArrowLeft,
 } from 'lucide-react';
 import { UserSettings } from '../types';
 
@@ -29,11 +31,15 @@ interface HeaderProps {
   totalArticleWords: number;
   settings: UserSettings;
   isPaused: boolean;
+  notebookCount?: number;
+  isPracticeMode?: boolean;
   onUpdateSettings: (updater: (prev: UserSettings) => UserSettings) => void;
   onTogglePause: () => void;
   onOpenImport: () => void;
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
+  onOpenNotebook: () => void;
+  onExitPracticeMode?: () => void;
   onResetProgress: () => void;
   onShuffleWords: () => void;
   onSelectTask: (taskIdx: number) => void;
@@ -49,11 +55,15 @@ export const Header: React.FC<HeaderProps> = ({
   totalArticleWords,
   settings,
   isPaused,
+  notebookCount = 0,
+  isPracticeMode = false,
   onUpdateSettings,
   onTogglePause,
   onOpenImport,
   onOpenSettings,
   onOpenShortcuts,
+  onOpenNotebook,
+  onExitPracticeMode,
   onResetProgress,
   onShuffleWords,
   onSelectTask,
@@ -116,12 +126,39 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Import Article URL Button */}
         <button
           onClick={onOpenImport}
-          className="ml-2 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-300 transition-colors border border-indigo-100 dark:border-slate-700 shadow-xs cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-indigo-50 hover:bg-indigo-100 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-indigo-600 dark:text-indigo-300 transition-colors border border-indigo-100 dark:border-slate-700 shadow-xs cursor-pointer"
           title="输入网址或文本解析文章单词"
         >
           <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
           <span>解析新文章</span>
         </button>
+
+        {/* Notebook Button */}
+        <button
+          onClick={onOpenNotebook}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-amber-50 hover:bg-amber-100/80 dark:bg-amber-950/40 dark:hover:bg-amber-900/50 text-amber-700 dark:text-amber-300 transition-colors border border-amber-200/80 dark:border-amber-800/60 shadow-xs cursor-pointer"
+          title="打开生词本 (本地持久化)"
+        >
+          <BookMarked className="w-3.5 h-3.5 text-amber-500" />
+          <span>生词本</span>
+          {notebookCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-mono-code font-bold">
+              {notebookCount}
+            </span>
+          )}
+        </button>
+
+        {/* Practice Mode Return Button if in practice mode */}
+        {isPracticeMode && onExitPracticeMode && (
+          <button
+            onClick={onExitPracticeMode}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-300 transition-colors border border-rose-200 dark:border-rose-900/40 cursor-pointer shadow-xs animate-pulse"
+            title="退出生词本练习，返回原文章"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>退出练习</span>
+          </button>
+        )}
       </div>
 
       {/* Center-right Toolbar Capsule (Screenshot style) */}

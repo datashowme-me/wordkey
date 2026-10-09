@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Volume2, ChevronLeft, ChevronRight, BookOpen } from 'lucide-react';
+import { Volume2, ChevronLeft, ChevronRight, BookOpen, Star, Sparkles } from 'lucide-react';
 import { WordItem, UserSettings } from '../types';
 import { soundManager } from '../utils/soundEffects';
+import { isWordFavorited, toggleWordFavorite } from '../utils/notebookStorage';
 
 interface WordTypingBoardProps {
   currentWord: WordItem | null;
@@ -31,16 +32,43 @@ export const WordTypingBoard: React.FC<WordTypingBoardProps> = ({
   const [typedLetters, setTypedLetters] = useState<string>('');
   const [isError, setIsError] = useState<boolean>(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const [isFavorited, setIsFavorited] = useState<boolean>(false);
   const mistakeCountRef = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Play audio helper
+  // Sync favorited state when word changes
+  useEffect(() => {
+    if (currentWord) {
+      setIsFavorited(isWordFavorited(currentWord.word));
+    } else {
+      setIsFavorited(false);
+    }
+  }, [currentWord?.word]);
+
+  // Preload next word's audio
+  useEffect(() => {
+    if (nextWord) {
+      soundManager.preloadWords([nextWord.word], settings.accent);
+    }
+  }, [nextWord?.word, settings.accent]);
+
+  // Play audio helper with audioRate and audioRepeat settings
   const playCurrentWordAudio = useCallback(async () => {
     if (!currentWord) return;
     setIsPlayingAudio(true);
-    await soundManager.playPronunciation(currentWord.word, settings.accent);
+    await soundManager.playPronunciation(currentWord.word, settings.accent, {
+      rate: settings.audioRate,
+      repeat: settings.audioRepeat,
+    });
     setIsPlayingAudio(false);
-  }, [currentWord, settings.accent]);
+  }, [currentWord, settings.accent, settings.audioRate, settings.audioRepeat]);
+
+  // Toggle favorite bookmark
+  const handleToggleFavorite = useCallback(() => {
+    if (!currentWord) return;
+    const newState = toggleWordFavorite(currentWord);
+    setIsFavorited(newState);
+  }, [currentWord]);
 
   // When current word changes: reset typing state & auto-play if enabled
   useEffect(() => {
@@ -101,6 +129,13 @@ export const WordTypingBoard: React.FC<WordTypingBoardProps> = ({
           setTypedLetters((prev) => prev.slice(0, -1));
           setIsError(false);
         }
+        return;
+      }
+
+      // Ctrl+B / Cmd+B: toggle bookmark
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        handleToggleFavorite();
         return;
       }
 
@@ -316,18 +351,32 @@ export const WordTypingBoard: React.FC<WordTypingBoardProps> = ({
               })}
             </div>
 
-            {/* Pronunciation Speaker Icon */}
-            <button
-              onClick={playCurrentWordAudio}
-              className={`p-2 rounded-xl transition-all ${
-                isPlayingAudio
-                  ? 'text-indigo-600 dark:text-indigo-400 scale-110 bg-indigo-50 dark:bg-indigo-950/50'
-                  : 'text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-              title="播放单词发音 (快捷键: Tab，单词时也可按空格)"
-            >
-              <Volume2 className={`w-6 h-6 sm:w-7 sm:h-7 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
-            </button>
+            {/* Pronunciation & Bookmark Actions */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={playCurrentWordAudio}
+                className={`p-2 rounded-xl transition-all cursor-pointer ${
+                  isPlayingAudio
+                    ? 'text-indigo-600 dark:text-indigo-400 scale-110 bg-indigo-50 dark:bg-indigo-950/50 ring-2 ring-indigo-500/20'
+                    : 'text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="播放单词发音 (快捷键: Tab，非词组时也可按空格)"
+              >
+                <Volume2 className={`w-6 h-6 sm:w-7 sm:h-7 ${isPlayingAudio ? 'animate-pulse' : ''}`} />
+              </button>
+
+              <button
+                onClick={handleToggleFavorite}
+                className={`p-2 rounded-xl transition-all cursor-pointer ${
+                  isFavorited
+                    ? 'text-amber-500 hover:text-amber-600 bg-amber-50/70 dark:bg-amber-950/40 ring-1 ring-amber-400/30'
+                    : 'text-slate-300 dark:text-slate-600 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title={isFavorited ? '已收录进生词本 (点击取消，快捷键: Ctrl+B)' : '加入生词本收藏 (快捷键: Ctrl+B)'}
+              >
+                <Star className={`w-5 h-5 sm:w-6 sm:h-6 ${isFavorited ? 'fill-amber-500' : ''}`} />
+              </button>
+            </div>
           </div>
 
           {/* Helper badge when current cursor is expecting a space */}

@@ -13,6 +13,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
     { key: 'A - Z', desc: '敲击字母进行打字默写输入' },
     { key: 'Space (空格键)', desc: '输入词组/短语中的空格（单个单词时可用于重播发音）' },
     { key: 'Tab', desc: '立即重新播放当前单词/词组发音（美音/英音）' },
+    { key: 'Ctrl + B', desc: '加入 / 取消生词本星标收藏' },
     { key: 'Shift', desc: '在美式发音 (AmE) 与英式发音 (BrE) 之间快速切换' },
     { key: 'Enter / →', desc: '跳过当前单词，进入下一个单词' },
     { key: '←', desc: '返回上一个单词重新复习' },

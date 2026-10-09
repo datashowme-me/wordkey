@@ -125,6 +125,77 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             />
           </div>
 
+          {/* Audio Speed Rate and Repeat */}
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700/60 space-y-3">
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                  发音朗读语速
+                </p>
+                <span className="text-xs font-mono-code font-bold text-indigo-600 dark:text-indigo-400">
+                  {settings.audioRate || 1.0}x
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { label: '慢速 0.8x', val: 0.8 },
+                  { label: '标准 1.0x', val: 1.0 },
+                  { label: '快速 1.2x', val: 1.2 },
+                ].map((item) => (
+                  <button
+                    key={item.val}
+                    type="button"
+                    onClick={() =>
+                      onUpdateSettings((prev) => ({
+                        ...prev,
+                        audioRate: item.val,
+                      }))
+                    }
+                    className={`py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      (settings.audioRate || 1.0) === item.val
+                        ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                  切词发音重复次数
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  切入新词时连续播报 1 次或 2 次强化听感
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[1, 2].map((cnt) => (
+                  <button
+                    key={cnt}
+                    type="button"
+                    onClick={() =>
+                      onUpdateSettings((prev) => ({
+                        ...prev,
+                        audioRepeat: cnt as 1 | 2,
+                      }))
+                    }
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                      (settings.audioRepeat || 1) === cnt
+                        ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    {cnt} 次
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* Key sound effect */}
           <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-700/60">
             <div className="flex items-center gap-2.5">

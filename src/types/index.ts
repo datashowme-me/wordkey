@@ -54,6 +54,8 @@ export interface UserSettings {
   accent: AccentType; // 'us' | 'uk'
   dictationMode: boolean; // 默写模式: hides word spelling
   autoPlayAudio: boolean; // Auto play pronunciation when word switches
+  audioRate: number; // 发音语速: 0.8 (慢速), 1.0 (原速), 1.2 (快速)
+  audioRepeat: 1 | 2; // 播放次数: 1 次或 2 次
   keySound: boolean; // Mechanical keyboard click sound
   showMeaning: boolean; // Show/hide Chinese translation
   showPhonetic: boolean; // Show/hide phonetic
@@ -61,3 +63,13 @@ export interface UserSettings {
   theme: 'light' | 'dark';
   taskSize: number; // 任务切分大小: 默认 20 个单词每组
 }
+
+export interface NotebookWordItem extends WordItem {
+  mistakeCount: number; // 累计打错次数
+  correctStreak: number; // 连续正确次数
+  isFavorite?: boolean; // 用户主动点击收藏
+  addedAt: number; // 添加时间戳
+  lastPracticedAt?: number; // 最近练习时间戳
+  isMastered?: boolean; // 是否已掌握
+}
+

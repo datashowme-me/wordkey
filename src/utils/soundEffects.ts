@@ -3,6 +3,7 @@
 class SoundManager {
   private audioCtx: AudioContext | null = null;
   private currentAudio: HTMLAudioElement | null = null;
+  private preloadedAudios = new Map<string, HTMLAudioElement>();
 
   private getAudioContext(): AudioContext | null {
     if (typeof window === 'undefined') return null;
@@ -16,6 +17,34 @@ class SoundManager {
       this.audioCtx.resume();
     }
     return this.audioCtx;
+  }
+
+  // Preload next upcoming words to eliminate audio network lag
+  preloadWords(words: string[], accent: 'us' | 'uk' = 'us'): void {
+    if (typeof window === 'undefined') return;
+    const type = accent === 'uk' ? '1' : '2';
+
+    // Limit cache size to 60 elements
+    if (this.preloadedAudios.size > 60) {
+      this.preloadedAudios.clear();
+    }
+
+    words.slice(0, 5).forEach((w) => {
+      const cleanWord = w.trim().toLowerCase();
+      if (!cleanWord) return;
+      const key = `${cleanWord}_${type}`;
+      if (!this.preloadedAudios.has(key)) {
+        try {
+          const audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanWord)}&type=${type}`;
+          const audio = new Audio();
+          audio.preload = 'auto';
+          audio.src = audioUrl;
+          this.preloadedAudios.set(key, audio);
+        } catch {
+          // Ignore preloading issues
+        }
+      }
+    });
   }
 
   // Play mechanical key click sound
@@ -106,70 +135,91 @@ class SoundManager {
     }
   }
 
-  // Play word pronunciation: accent 'us' or 'uk'
-  playPronunciation(word: string, accent: 'us' | 'uk' = 'us'): Promise<void> {
-    return new Promise((resolve) => {
-      const cleanWord = word.trim().toLowerCase();
-      if (!cleanWord) {
-        resolve();
-        return;
-      }
-
-      // Stop previous audio
-      if (this.currentAudio) {
-        this.currentAudio.pause();
-        this.currentAudio = null;
-      }
-
-      // Dict voice URL: type 1 = UK (英音), type 2 = US (美音)
-      const type = accent === 'uk' ? '1' : '2';
-      const audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanWord)}&type=${type}`;
-
-      const audio = new Audio(audioUrl);
-      this.currentAudio = audio;
-
-      let fallbackTriggered = false;
-
-      const fallbackToWebSpeech = () => {
-        if (fallbackTriggered) return;
-        fallbackTriggered = true;
-        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-          const utterance = new SpeechSynthesisUtterance(cleanWord);
-          utterance.lang = accent === 'uk' ? 'en-GB' : 'en-US';
-          utterance.rate = 0.9;
-          utterance.onend = () => resolve();
-          utterance.onerror = () => resolve();
-          window.speechSynthesis.speak(utterance);
-        } else {
+  // Play word pronunciation: accent 'us' or 'uk', with optional playback rate and repeat count
+  async playPronunciation(
+    word: string,
+    accent: 'us' | 'uk' = 'us',
+    options?: { rate?: number; repeat?: 1 | 2 }
+  ): Promise<void> {
+    const playOnce = (): Promise<void> => {
+      return new Promise((resolve) => {
+        const cleanWord = word.trim().toLowerCase();
+        if (!cleanWord) {
           resolve();
+          return;
         }
-      };
 
-      const timer = setTimeout(() => {
-        // If audio doesn't start or load in 1.2s, use speech synthesis fallback
-        fallbackToWebSpeech();
-      }, 1200);
+        // Stop previous audio
+        if (this.currentAudio) {
+          this.currentAudio.pause();
+          this.currentAudio = null;
+        }
 
-      audio.onplay = () => {
-        clearTimeout(timer);
-      };
+        // Dict voice URL: type 1 = UK (英音), type 2 = US (美音)
+        const type = accent === 'uk' ? '1' : '2';
+        const key = `${cleanWord}_${type}`;
+        const audioUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(cleanWord)}&type=${type}`;
 
-      audio.onended = () => {
-        clearTimeout(timer);
-        resolve();
-      };
+        const audio = this.preloadedAudios.get(key) || new Audio(audioUrl);
+        // Reset playback position if reused
+        audio.currentTime = 0;
+        if (options?.rate) {
+          audio.playbackRate = options.rate;
+        }
+        this.currentAudio = audio;
 
-      audio.onerror = () => {
-        clearTimeout(timer);
-        fallbackToWebSpeech();
-      };
+        let fallbackTriggered = false;
 
-      audio.play().catch(() => {
-        clearTimeout(timer);
-        fallbackToWebSpeech();
+        const fallbackToWebSpeech = () => {
+          if (fallbackTriggered) return;
+          fallbackTriggered = true;
+          if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(cleanWord);
+            utterance.lang = accent === 'uk' ? 'en-GB' : 'en-US';
+            utterance.rate = (options?.rate || 1.0) * 0.9;
+            utterance.onend = () => resolve();
+            utterance.onerror = () => resolve();
+            window.speechSynthesis.speak(utterance);
+          } else {
+            resolve();
+          }
+        };
+
+        const timer = setTimeout(() => {
+          // If audio doesn't start or load in 1.2s, use speech synthesis fallback
+          fallbackToWebSpeech();
+        }, 1200);
+
+        audio.onplay = () => {
+          clearTimeout(timer);
+        };
+
+        audio.onended = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+
+        audio.onerror = () => {
+          clearTimeout(timer);
+          fallbackToWebSpeech();
+        };
+
+        audio.play().catch(() => {
+          clearTimeout(timer);
+          fallbackToWebSpeech();
+        });
       });
-    });
+    };
+
+    // First playback
+    await playOnce();
+
+    // If repeat is requested, wait 220ms and play second time
+    if (options?.repeat === 2) {
+      await new Promise((r) => setTimeout(r, 220));
+      await playOnce();
+    }
   }
 }
 

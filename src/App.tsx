@@ -13,15 +13,32 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { CompletionModal } from './components/CompletionModal';
 import { TaskMilestoneModal } from './components/TaskMilestoneModal';
 import { TrendModal } from './components/TrendModal';
-import { WordItem, UserSettings, TypingStats, TaskProgressPoint } from './types';
+import { NotebookModal } from './components/NotebookModal';
+import { WordItem, NotebookWordItem, UserSettings, TypingStats, TaskProgressPoint } from './types';
 import { SAMPLE_ARTICLES } from './data/fallbackData';
 import { loadOfficialDictionary } from './utils/dictionaryLoader';
+import {
+  getNotebookWords,
+  recordWordMistake,
+  recordWordSuccess,
+} from './utils/notebookStorage';
 
 export default function App() {
   // Initialize with the Oxford sample (matching user's screenshot)
   const defaultArticle = SAMPLE_ARTICLES[0];
   const [allWords, setAllWords] = useState<WordItem[]>(defaultArticle.words);
   const [articleTitle, setArticleTitle] = useState<string>(defaultArticle.title);
+
+  // Notebook and Practice state
+  const [isNotebookOpen, setIsNotebookOpen] = useState<boolean>(false);
+  const [notebookCount, setNotebookCount] = useState<number>(() => getNotebookWords().length);
+  const [isNotebookPractice, setIsNotebookPractice] = useState<boolean>(false);
+  const originalArticleBackup = useRef<{
+    words: WordItem[];
+    title: string;
+    taskIndex: number;
+    wordIndex: number;
+  } | null>(null);
 
   // Progress history for accuracy trend visualization
   const [taskProgressHistory, setTaskProgressHistory] = useState<TaskProgressPoint[]>([]);
@@ -33,6 +50,8 @@ export default function App() {
       accent: 'us', // 美音 (AmE) by default like screenshot
       dictationMode: false,
       autoPlayAudio: true,
+      audioRate: 1.0, // 默认标准语速
+      audioRepeat: 1, // 默认播放 1 次
       keySound: true,
       showMeaning: true,
       showPhonetic: true,
@@ -84,6 +103,15 @@ export default function App() {
     wpm: 13,
     accuracy: 91,
   });
+
+  // Sync notebook count with storage
+  useEffect(() => {
+    const handleStorageUpdate = () => {
+      setNotebookCount(getNotebookWords().length);
+    };
+    window.addEventListener('wordkey_notebook_updated', handleStorageUpdate);
+    return () => window.removeEventListener('wordkey_notebook_updated', handleStorageUpdate);
+  }, []);
 
   // Sync theme with document element
   useEffect(() => {
@@ -195,6 +223,9 @@ export default function App() {
   const handleWordComplete = useCallback(
     (completedWord: WordItem, mistakesCount: number) => {
       if (mistakesCount > 0) {
+        // Automatically persist mistake to local notebook
+        recordWordMistake(completedWord);
+
         setAllMistakenWords((prev) => {
           if (!prev.some((w) => w.id === completedWord.id)) {
             return [...prev, completedWord];
@@ -207,6 +238,9 @@ export default function App() {
           }
           return prev;
         });
+      } else {
+        // Correct completion without mistakes
+        recordWordSuccess(completedWord.id, isNotebookPractice);
       }
 
       setStats((prev) => {
@@ -247,7 +281,7 @@ export default function App() {
         }
       }
     },
-    [taskWordIndex, currentTaskWords.length, currentTaskIndex, totalTasks]
+    [taskWordIndex, currentTaskWords.length, currentTaskIndex, totalTasks, isNotebookPractice]
   );
 
   // Navigation within current task
@@ -382,6 +416,55 @@ export default function App() {
     }
   };
 
+  // Start practice session with notebook words
+  const handleStartNotebookPractice = (practiceWords: NotebookWordItem[], modeTitle: string) => {
+    if (!isNotebookPractice) {
+      originalArticleBackup.current = {
+        words: allWords,
+        title: articleTitle,
+        taskIndex: currentTaskIndex,
+        wordIndex: taskWordIndex,
+      };
+    }
+    setAllWords([...practiceWords]);
+    setArticleTitle(modeTitle);
+    setCurrentTaskIndex(0);
+    setTaskWordIndex(0);
+    setIsNotebookPractice(true);
+    setTaskMistakes([]);
+    setAllMistakenWords([]);
+    setTaskProgressHistory([]);
+    setSessionProgressHistory([]);
+    setIsComplete(false);
+    setIsTaskMilestoneOpen(false);
+    setStats({
+      elapsedSeconds: 0,
+      totalKeystrokes: 0,
+      correctKeystrokes: 0,
+      wrongKeystrokes: 0,
+      correctWords: 0,
+      wrongWords: 0,
+      wpm: 0,
+      accuracy: 100,
+    });
+  };
+
+  // Exit notebook practice and restore previous article
+  const handleExitNotebookPractice = () => {
+    if (originalArticleBackup.current) {
+      const backup = originalArticleBackup.current;
+      setAllWords(backup.words);
+      setArticleTitle(backup.title);
+      setCurrentTaskIndex(backup.taskIndex);
+      setTaskWordIndex(backup.wordIndex);
+    }
+    setIsNotebookPractice(false);
+    setTaskMistakes([]);
+    setTaskProgressHistory([]);
+    setIsComplete(false);
+    setIsTaskMilestoneOpen(false);
+  };
+
   const currentWord = currentTaskWords[taskWordIndex] || null;
   const prevWord = taskWordIndex > 0 ? currentTaskWords[taskWordIndex - 1] : null;
   const nextWord = taskWordIndex + 1 < currentTaskWords.length ? currentTaskWords[taskWordIndex + 1] : null;
@@ -399,11 +482,15 @@ export default function App() {
         totalArticleWords={allWords.length}
         settings={settings}
         isPaused={isPaused}
+        notebookCount={notebookCount}
+        isPracticeMode={isNotebookPractice}
         onUpdateSettings={setSettings}
         onTogglePause={() => setIsPaused((prev) => !prev)}
         onOpenImport={() => setIsImportOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        onOpenNotebook={() => setIsNotebookOpen(true)}
+        onExitPracticeMode={handleExitNotebookPractice}
         onResetProgress={handleResetProgress}
         onShuffleWords={handleShuffleWords}
         onSelectTask={handleSelectTask}
@@ -450,6 +537,14 @@ export default function App() {
       <ShortcutsModal
         isOpen={isShortcutsOpen}
         onClose={() => setIsShortcutsOpen(false)}
+      />
+
+      {/* Notebook Modal (Local Persistence) */}
+      <NotebookModal
+        isOpen={isNotebookOpen}
+        onClose={() => setIsNotebookOpen(false)}
+        settings={settings}
+        onStartPractice={handleStartNotebookPractice}
       />
 
       {/* Real-time Trend Modal (can be opened anytime from footer) */}
