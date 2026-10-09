@@ -1,10 +1,12 @@
 import { cleanHtml, tokenizeArticle, fetchWordAnnotation } from './utils/articleParser';
 import { WordItem, DictEntry } from './types';
+import { callDeepSeek } from './utils/deepseek';
 
 interface Env {
   ASSETS: {
     fetch: (request: Request) => Promise<Response>;
   };
+  DEEPSEEK_API_KEY?: string;
 }
 
 export default {
@@ -100,6 +102,54 @@ export default {
           );
         }
 
+        // Fallback to DeepSeek if key exists and some words are missing annotations
+        if (env.DEEPSEEK_API_KEY) {
+          const missingWords = uniqueWords.filter((w) => !annotationMap.has(w));
+          if (missingWords.length > 0) {
+            try {
+              const prompt = `请为以下英语单词提供规范的美式音标 (phoneticAmE)、英式音标 (phoneticBrE)、词性 (pos) 和详尽清晰的中文注释/释义 (meaning)。
+必须以合法 JSON 格式输出，根对象格式为：
+{
+  "words": [
+    {
+      "word": "单词",
+      "phoneticAmE": "[音标]",
+      "phoneticBrE": "[音标]",
+      "pos": "词性",
+      "meaning": "中文释义"
+    }
+  ]
+}
+待查询单词列表: ${missingWords.slice(0, 50).join(', ')}`;
+
+              const parsed = await callDeepSeek(
+                [
+                  { role: 'system', content: '你是一个专业的英语词典与翻译助手。请严格输出合法 JSON 格式数据。' },
+                  { role: 'user', content: prompt },
+                ],
+                env.DEEPSEEK_API_KEY
+              );
+
+              const list = Array.isArray(parsed) ? parsed : (parsed?.words || []);
+              if (Array.isArray(list)) {
+                list.forEach((item: any) => {
+                  const w = String(item.word || '').toLowerCase().trim();
+                  if (w) {
+                    annotationMap.set(w, {
+                      phoneticAmE: item.phoneticAmE || `[${w}]`,
+                      phoneticBrE: item.phoneticBrE || item.phoneticAmE || `[${w}]`,
+                      pos: item.pos || 'n./v.',
+                      meaning: item.meaning || `${w}`,
+                    });
+                  }
+                });
+              }
+            } catch (err) {
+              console.error('DeepSeek fallback error in worker:', err);
+            }
+          }
+        }
+
         const words: WordItem[] = tokens.map((token, idx) => {
           const entry = annotationMap.get(token.word.toLowerCase());
           return {
@@ -132,7 +182,83 @@ export default {
       }
     }
 
-    // 2. API: Lookup word
+    // 2. API: Generate custom vocabulary expansion pack using DeepSeek
+    if (url.pathname === '/api/generate-vocab-pack' && request.method === 'POST') {
+      try {
+        const body: any = await request.json().catch(() => ({}));
+        const { topic = '托福核心高频词汇', count = 40 } = body;
+        const requestedCount = Math.min(100, Math.max(10, Number(count) || 40));
+
+        const apiKey = env.DEEPSEEK_API_KEY;
+        if (!apiKey) {
+          return new Response(
+            JSON.stringify({ error: '未配置 DEEPSEEK_API_KEY，请在 Cloudflare 环境变量中添加 DEEPSEEK_API_KEY' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const prompt = `你是一个顶级英语教学专家与词汇学导师。用户希望系统化拓展词汇量。
+请根据主题/级别: "${topic}"，生成 ${requestedCount} 个最具代表性、高性价比、能显著提升英语词汇量的核心优质英语单词。
+请以 JSON 格式输出，根对象结构必须如下：
+{
+  "title": "词包标题",
+  "category": "分类标签",
+  "words": [
+    {
+      "word": "单词小写原型",
+      "phoneticAmE": "[美式音标]",
+      "phoneticBrE": "[英式音标]",
+      "pos": "词性",
+      "meaning": "中文释义",
+      "sentence": "自然地道英文例句",
+      "sentenceTranslation": "例句中文翻译",
+      "difficulty": "easy 或 medium 或 hard"
+    }
+  ]
+}`;
+
+        const parsed = await callDeepSeek(
+          [
+            { role: 'system', content: '你是一个顶级英语教育专家，精通词汇学与双语教学。请严格输出 JSON 格式。' },
+            { role: 'user', content: prompt },
+          ],
+          apiKey
+        );
+
+        const wordsList = (parsed.words || []).map((item: any, idx: number) => ({
+          id: `ai-pack-${Date.now()}-${idx}-${item.word}`,
+          word: String(item.word || '').toLowerCase().trim().replace(/[^a-z]/g, ''),
+          phoneticAmE: item.phoneticAmE || `[${item.word}]`,
+          phoneticBrE: item.phoneticBrE || item.phoneticAmE || `[${item.word}]`,
+          pos: item.pos || 'n.',
+          meaning: item.meaning || '',
+          sentence: item.sentence || '',
+          sentenceTranslation: item.sentenceTranslation || '',
+          difficulty: ['easy', 'medium', 'hard'].includes(item.difficulty)
+            ? item.difficulty
+            : 'medium',
+          frequency: 1,
+        })).filter((w: any) => w.word.length > 1);
+
+        return new Response(
+          JSON.stringify({
+            title: parsed.title || topic,
+            category: parsed.category || '拓展词库',
+            totalWords: wordsList.length,
+            words: wordsList,
+          }),
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : '生成拓展词库失败';
+        return new Response(
+          JSON.stringify({ error: message }),
+          { status: 500, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // 3. API: Lookup word
     if (url.pathname === '/api/lookup-word') {
       const word = url.searchParams.get('word')?.trim().toLowerCase() || '';
       if (!word) {
@@ -155,7 +281,8 @@ export default {
       );
     }
 
-    // 3. Fall through to Cloudflare Static Assets (SPA / dist files)
+    // 4. Fall through to Cloudflare Static Assets (SPA / dist files)
     return env.ASSETS.fetch(request);
   },
 };
+

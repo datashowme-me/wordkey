@@ -3,8 +3,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type } from '@google/genai';
 import { COMMON_DICTIONARY, DictEntry } from './src/data/commonDictionary.ts';
+import { callDeepSeek } from './src/utils/deepseek.ts';
 
 dotenv.config();
 
@@ -327,67 +327,53 @@ app.post('/api/parse-article', async (req: Request, res: Response) => {
       );
     }
 
-    // Step 3: For words that still lack Chinese annotations, use Gemini as an intelligent fallback
+    // Step 3: For words that still lack Chinese annotations, use DeepSeek as an intelligent fallback
     const missingChineseWords = uniqueWordsList.filter((w) => !wordAnnotationMap.has(w));
-    const apiKey = process.env.GEMINI_API_KEY;
+    const deepseekKey = process.env.DEEPSEEK_API_KEY;
 
-    if (apiKey && missingChineseWords.length > 0) {
+    if (deepseekKey && missingChineseWords.length > 0) {
       try {
-        const ai = new GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            },
-          },
-        });
+        const prompt = `请为以下英语单词提供规范的美式音标 (phoneticAmE)、英式音标 (phoneticBrE)、词性 (pos) 和详尽清晰的中文注释/释义 (meaning)。
+必须以合法 JSON 格式输出，根对象格式为：
+{
+  "words": [
+    {
+      "word": "单词",
+      "phoneticAmE": "[音标]",
+      "phoneticBrE": "[音标]",
+      "pos": "词性",
+      "meaning": "中文释义"
+    }
+  ]
+}
+待查询单词列表: ${missingChineseWords.slice(0, 50).join(', ')}`;
 
-        const prompt = `请为以下英语单词提供规范的美式音标 (phoneticAmE)、英式音标 (phoneticBrE)、词性 (pos) 和详尽清晰的中文注释/释义 (meaning)：
-单词列表: ${missingChineseWords.slice(0, 50).join(', ')}`;
+        const parsed = await callDeepSeek(
+          [
+            { role: 'system', content: '你是一个专业的英语词典与翻译助手。请严格输出合法 JSON 格式数据。' },
+            { role: 'user', content: prompt },
+          ],
+          deepseekKey
+        );
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  word: { type: Type.STRING },
-                  phoneticAmE: { type: Type.STRING },
-                  phoneticBrE: { type: Type.STRING },
-                  pos: { type: Type.STRING },
-                  meaning: { type: Type.STRING },
-                },
-                required: ['word', 'meaning'],
-              },
-            },
-          },
-        });
-
-        const jsonText = response.text?.trim();
-        if (jsonText) {
-          const parsed = JSON.parse(jsonText);
-          if (Array.isArray(parsed)) {
-            parsed.forEach((item: any) => {
-              const w = String(item.word || '').toLowerCase().trim();
-              if (w) {
-                const entry: DictEntry = {
-                  phoneticAmE: item.phoneticAmE || `[${w}]`,
-                  phoneticBrE: item.phoneticBrE || item.phoneticAmE || `[${w}]`,
-                  pos: item.pos || 'n./v.',
-                  meaning: item.meaning || `${w}`,
-                };
-                wordAnnotationMap.set(w, entry);
-                annotationCache.set(w, entry);
-              }
-            });
-          }
+        const list = Array.isArray(parsed) ? parsed : (parsed?.words || []);
+        if (Array.isArray(list)) {
+          list.forEach((item: any) => {
+            const w = String(item.word || '').toLowerCase().trim();
+            if (w) {
+              const entry: DictEntry = {
+                phoneticAmE: item.phoneticAmE || `[${w}]`,
+                phoneticBrE: item.phoneticBrE || item.phoneticAmE || `[${w}]`,
+                pos: item.pos || 'n./v.',
+                meaning: item.meaning || `${w}`,
+              };
+              wordAnnotationMap.set(w, entry);
+              annotationCache.set(w, entry);
+            }
+          });
         }
       } catch (aiErr) {
-        console.error('Gemini fallback error:', aiErr);
+        console.error('DeepSeek fallback annotation error:', aiErr);
       }
     }
 
@@ -438,69 +424,38 @@ app.post('/api/generate-vocab-pack', async (req: Request, res: Response) => {
     const { topic = '托福核心高频词汇', count = 40, level = 'advanced' } = req.body;
     const requestedCount = Math.min(100, Math.max(10, Number(count) || 40));
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.DEEPSEEK_API_KEY;
     if (!apiKey) {
-      return res.status(400).json({ error: '需要 API Key 才能动态生成拓展词库' });
+      return res.status(400).json({ error: '需要配置 DEEPSEEK_API_KEY 才能动态生成拓展词库' });
     }
-
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: { 'User-Agent': 'aistudio-build' },
-      },
-    });
 
     const prompt = `你是一个顶级英语教学专家与词汇学导师。用户希望系统化拓展词汇量。
 请根据主题/级别: "${topic}"，生成 ${requestedCount} 个最具代表性、高性价比、能显著提升英语词汇量的核心优质英语单词。
-每个单词必须包含：
-1. word: 单词小写纯英文原型
-2. phoneticAmE: 规范美式国际音标 (如 [ˈælɡərɪðəm])
-3. phoneticBrE: 规范英式国际音标
-4. pos: 词性 (如 n., v., adj., adv.)
-5. meaning: 精准、地道、权威的中文详细释义
-6. sentence: 纯正自然的英文情境例句
-7. sentenceTranslation: 该英文例句的优雅流畅中文翻译
-8. difficulty: 难度等级 (easy, medium, hard)`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            category: { type: Type.STRING },
-            words: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  word: { type: Type.STRING },
-                  phoneticAmE: { type: Type.STRING },
-                  phoneticBrE: { type: Type.STRING },
-                  pos: { type: Type.STRING },
-                  meaning: { type: Type.STRING },
-                  sentence: { type: Type.STRING },
-                  sentenceTranslation: { type: Type.STRING },
-                  difficulty: { type: Type.STRING },
-                },
-                required: ['word', 'phoneticAmE', 'phoneticBrE', 'pos', 'meaning', 'sentence'],
-              },
-            },
-          },
-          required: ['title', 'words'],
-        },
-      },
-    });
-
-    const jsonText = response.text?.trim();
-    if (!jsonText) {
-      throw new Error('AI 未能返回有效词汇数据');
+请以 JSON 格式输出，根对象结构必须如下：
+{
+  "title": "词包标题",
+  "category": "分类标签",
+  "words": [
+    {
+      "word": "单词小写原型",
+      "phoneticAmE": "[美式音标]",
+      "phoneticBrE": "[英式音标]",
+      "pos": "词性",
+      "meaning": "中文释义",
+      "sentence": "自然地道英文例句",
+      "sentenceTranslation": "例句中文翻译",
+      "difficulty": "easy 或 medium 或 hard"
     }
+  ]
+}`;
 
-    const parsed = JSON.parse(jsonText);
+    const parsed = await callDeepSeek(
+      [
+        { role: 'system', content: '你是一个顶级英语教育专家，精通词汇学与双语教学。请严格输出 JSON 格式。' },
+        { role: 'user', content: prompt },
+      ],
+      apiKey
+    );
     const wordsList = (parsed.words || []).map((item: any, idx: number) => ({
       id: `ai-pack-${Date.now()}-${idx}-${item.word}`,
       word: String(item.word || '').toLowerCase().trim().replace(/[^a-z]/g, ''),
