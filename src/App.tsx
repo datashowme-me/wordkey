@@ -14,6 +14,7 @@ import { CompletionModal } from './components/CompletionModal';
 import { TaskMilestoneModal } from './components/TaskMilestoneModal';
 import { TrendModal } from './components/TrendModal';
 import { NotebookModal } from './components/NotebookModal';
+import { ProModal } from './components/ProModal';
 import { WordItem, NotebookWordItem, UserSettings, TypingStats, TaskProgressPoint } from './types';
 import { SAMPLE_ARTICLES } from './data/fallbackData';
 import { loadOfficialDictionary } from './utils/dictionaryLoader';
@@ -22,12 +23,18 @@ import {
   recordWordMistake,
   recordWordSuccess,
 } from './utils/notebookStorage';
+import { getMembershipStatus } from './utils/proStorage';
 
 export default function App() {
   // Initialize with the Oxford sample (matching user's screenshot)
   const defaultArticle = SAMPLE_ARTICLES[0];
   const [allWords, setAllWords] = useState<WordItem[]>(defaultArticle.words);
   const [articleTitle, setArticleTitle] = useState<string>(defaultArticle.title);
+
+  // Pro & Membership state
+  const [membership, setMembership] = useState(() => getMembershipStatus());
+  const [isProModalOpen, setIsProModalOpen] = useState<boolean>(false);
+  const [proModalReason, setProModalReason] = useState<string | undefined>(undefined);
 
   // Notebook and Practice state
   const [isNotebookOpen, setIsNotebookOpen] = useState<boolean>(false);
@@ -111,6 +118,20 @@ export default function App() {
     };
     window.addEventListener('wordkey_notebook_updated', handleStorageUpdate);
     return () => window.removeEventListener('wordkey_notebook_updated', handleStorageUpdate);
+  }, []);
+
+  // Sync Pro status and membership with storage
+  useEffect(() => {
+    const handleProUpdate = () => {
+      setMembership(getMembershipStatus());
+    };
+    window.addEventListener('wordkey_pro_updated', handleProUpdate);
+    return () => window.removeEventListener('wordkey_pro_updated', handleProUpdate);
+  }, []);
+
+  const handleOpenProModal = useCallback((reason?: string) => {
+    setProModalReason(reason);
+    setIsProModalOpen(true);
   }, []);
 
   // Sync theme with document element
@@ -484,6 +505,8 @@ export default function App() {
         isPaused={isPaused}
         notebookCount={notebookCount}
         isPracticeMode={isNotebookPractice}
+        isPro={membership.isPro}
+        onOpenProModal={handleOpenProModal}
         onUpdateSettings={setSettings}
         onTogglePause={() => setIsPaused((prev) => !prev)}
         onOpenImport={() => setIsImportOpen(true)}
@@ -525,6 +548,7 @@ export default function App() {
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
         onImportWords={handleImportWords}
+        onOpenProModal={handleOpenProModal}
       />
 
       <SettingsModal
@@ -545,6 +569,13 @@ export default function App() {
         onClose={() => setIsNotebookOpen(false)}
         settings={settings}
         onStartPractice={handleStartNotebookPractice}
+      />
+
+      {/* Pro Membership Paywall & Activation Modal */}
+      <ProModal
+        isOpen={isProModalOpen}
+        onClose={() => setIsProModalOpen(false)}
+        reason={proModalReason}
       />
 
       {/* Real-time Trend Modal (can be opened anytime from footer) */}

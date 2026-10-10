@@ -73,3 +73,27 @@ export interface NotebookWordItem extends WordItem {
   isMastered?: boolean; // 是否已掌握
 }
 
+export type ProTier = 'free' | 'lifetime' | 'annual' | 'monthly';
+
+export interface MembershipStatus {
+  isPro: boolean;
+  tier: ProTier;
+  activatedAt?: number;
+  activationCode?: string;
+  extraParseQuota: number; // 加量包额外解析次数
+}
+
+export interface DailyQuotaUsage {
+  usedToday: number;
+  dailyLimit: number;
+  remainingToday: number;
+  isPro: boolean;
+  totalAvailable: number; // remainingToday + extraParseQuota
+}
+
+export interface ProMetrics {
+  paywallViews: number;
+  quotaHits: number;
+  unlockSuccesses: number;
+}
+

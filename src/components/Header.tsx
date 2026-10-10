@@ -18,6 +18,7 @@ import {
   Layers,
   BookMarked,
   ArrowLeft,
+  Crown,
 } from 'lucide-react';
 import { UserSettings } from '../types';
 
@@ -33,6 +34,8 @@ interface HeaderProps {
   isPaused: boolean;
   notebookCount?: number;
   isPracticeMode?: boolean;
+  isPro?: boolean;
+  onOpenProModal?: (reason?: string) => void;
   onUpdateSettings: (updater: (prev: UserSettings) => UserSettings) => void;
   onTogglePause: () => void;
   onOpenImport: () => void;
@@ -57,6 +60,8 @@ export const Header: React.FC<HeaderProps> = ({
   isPaused,
   notebookCount = 0,
   isPracticeMode = false,
+  isPro = false,
+  onOpenProModal,
   onUpdateSettings,
   onTogglePause,
   onOpenImport,
@@ -101,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="w-full max-w-7xl mx-auto pt-4 px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-4">
       {/* Brand logo & import button */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
         <div className="flex items-center gap-2 cursor-pointer group" onClick={onOpenImport}>
           {/* Keyboard Key 3D Icon */}
           <div className="relative w-10 h-10 rounded-xl bg-gradient-to-b from-indigo-500 to-indigo-600 shadow-md shadow-indigo-500/20 flex items-center justify-center text-white font-bold text-lg transform group-hover:-translate-y-0.5 transition-transform duration-150 border-b-2 border-indigo-700">
@@ -147,6 +152,27 @@ export const Header: React.FC<HeaderProps> = ({
             </span>
           )}
         </button>
+
+        {/* Pro Membership / Upgrade Button (Freemium monetization) */}
+        {isPro ? (
+          <button
+            onClick={() => onOpenProModal && onOpenProModal()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500/15 to-amber-600/10 hover:from-amber-500/25 hover:to-amber-600/20 text-amber-700 dark:text-amber-300 border border-amber-400/50 dark:border-amber-400/40 shadow-xs cursor-pointer transition-all hover:scale-105"
+            title="WordKey Pro 尊贵会员 (已解锁全部权益)"
+          >
+            <Crown className="w-3.5 h-3.5 text-amber-500 fill-current" />
+            <span>👑 PRO 会员</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => onOpenProModal && onOpenProModal()}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-xs shadow-amber-500/20 active:scale-95 cursor-pointer transition-all hover:shadow-amber-500/30"
+            title="升级 Pro 专业版 (解锁无限文章解析与真题深度词库)"
+          >
+            <Crown className="w-3.5 h-3.5 fill-current" />
+            <span>升级 Pro</span>
+          </button>
+        )}
 
         {/* Practice Mode Return Button if in practice mode */}
         {isPracticeMode && onExitPracticeMode && (

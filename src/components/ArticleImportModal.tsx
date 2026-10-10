@@ -15,17 +15,25 @@ import { SAMPLE_ARTICLES, SAMPLE_CATEGORIES } from '../data/fallbackData';
 import { WordItem, ExtractionMode, DictEntry } from '../types';
 import { loadOfficialDictionary } from '../utils/dictionaryLoader';
 import { tokenizeArticle, fetchWordAnnotation } from '../utils/articleParser';
+import {
+  canUserParseArticle,
+  consumeParseQuota,
+  getDailyParseUsage,
+  logProMetric,
+} from '../utils/proStorage';
 
 interface ArticleImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImportWords: (words: WordItem[], title: string, sourceUrl?: string) => void;
+  onOpenProModal?: (reason?: string) => void;
 }
 
 export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
   isOpen,
   onClose,
   onImportWords,
+  onOpenProModal,
 }) => {
   const [tab, setTab] = useState<'url' | 'text' | 'samples' | 'generator'>('samples');
   const [urlInput, setUrlInput] = useState<string>('');
@@ -124,6 +132,18 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
       return;
     }
 
+    // Check parse quota
+    const perm = canUserParseArticle();
+    if (!perm.allowed) {
+      logProMetric('quota_hit');
+      if (onOpenProModal) {
+        onOpenProModal(perm.reason);
+      } else {
+        setErrorMessage(perm.reason || '今日文章解析限额已用尽');
+      }
+      return;
+    }
+
     let normalizedUrl = urlInput.trim();
     if (!/^https?:\/\//i.test(normalizedUrl)) {
       normalizedUrl = 'https://' + normalizedUrl;
@@ -166,6 +186,8 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
         throw new Error('未能从该文章提取到有效单词，请尝试直接粘贴文本');
       }
 
+      // Consume quota
+      consumeParseQuota();
       onImportWords(data.words, data.title || '提取的文章', normalizedUrl);
       onClose();
     } catch (err: unknown) {
@@ -181,6 +203,18 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
     e.preventDefault();
     if (!textInput.trim()) {
       setErrorMessage('请粘贴需要解析的英文文章正文');
+      return;
+    }
+
+    // Check parse quota
+    const perm = canUserParseArticle();
+    if (!perm.allowed) {
+      logProMetric('quota_hit');
+      if (onOpenProModal) {
+        onOpenProModal(perm.reason);
+      } else {
+        setErrorMessage(perm.reason || '今日文章解析限额已用尽');
+      }
       return;
     }
 
@@ -207,6 +241,7 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
         const resText = await response.text();
         const data = JSON.parse(resText);
         if (response.ok && data.words && data.words.length > 0) {
+          consumeParseQuota();
           onImportWords(data.words, data.title || '自定义文章');
           onClose();
           success = true;
@@ -249,18 +284,18 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
             word: token.word,
             phoneticAmE: entry?.phoneticAmE || `[${token.word}]`,
             phoneticBrE: entry?.phoneticBrE || `[${token.word}]`,
-            pos: entry?.pos || 'n./v.',
-            meaning: entry?.meaning || '核心词汇',
-            sentence: token.sentence,
-            frequency: 1,
+            pos: entry?.pos || 'n.',
+            meaning: entry?.meaning || '词汇学习',
+            sentence: token.sentence || textInput.slice(0, 80),
           };
         });
 
-        onImportWords(words, titleInput.trim() || '自定义文章');
+        consumeParseQuota();
+        onImportWords(words, titleInput.trim() || '自定义文本练习');
         onClose();
       }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '解析文章失败';
+      const msg = err instanceof Error ? err.message : '解析文本失败';
       setErrorMessage(msg);
     } finally {
       setIsLoading(false);
@@ -298,6 +333,18 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
       return;
     }
 
+    // Check quota for AI pack generation
+    const perm = canUserParseArticle();
+    if (!perm.allowed) {
+      logProMetric('quota_hit');
+      if (onOpenProModal) {
+        onOpenProModal('AI专属词库深度拓展需要消耗解析额度。升级 Pro 解锁无限生成！');
+      } else {
+        setErrorMessage(perm.reason || '今日解析额度已用尽');
+      }
+      return;
+    }
+
     setIsLoading(true);
     setErrorMessage(null);
     setLoadingStep(`正在生成【${customTopic}】${customWordCount}个核心拓展词汇与音标释义...`);
@@ -321,6 +368,7 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
         throw new Error('未能生成有效单词列表');
       }
 
+      consumeParseQuota();
       onImportWords(data.words, data.title || customTopic);
       onClose();
     } catch (err: unknown) {
@@ -342,11 +390,37 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
-                WordKey 词汇拓展与文章解析中心
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">
+                  WordKey 词汇拓展与文章解析中心
+                </h2>
+                {(() => {
+                  const usage = getDailyParseUsage();
+                  return usage.isPro ? (
+                    <span
+                      onClick={() => onOpenProModal && onOpenProModal()}
+                      className="cursor-pointer px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300/60 flex items-center gap-1 shadow-xs hover:scale-105 transition-transform"
+                      title="👑 Pro 会员享无限文章解析"
+                    >
+                      👑 Pro 无限解析
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenProModal &&
+                        onOpenProModal('今日免费文章解析额度（3 篇/日）用尽，升级 Pro 解锁无限解析！')
+                      }
+                      className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1 hover:border-indigo-400 transition-colors cursor-pointer"
+                    >
+                      <span>解析额度: {usage.totalAvailable} / {usage.dailyLimit} 篇</span>
+                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold underline">升级</span>
+                    </button>
+                  );
+                })()}
+              </div>
               <p className="text-xs text-slate-400 dark:text-slate-400">
-                支持系统化拓展大词库、AI专属词库定制、以及文章解析默写
+                支持真题阅读解析、系统化大词库、以及AI专属词库定制
               </p>
             </div>
           </div>
@@ -734,9 +808,47 @@ export const ArticleImportModal: React.FC<ArticleImportModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
-                  英文文章正文
-                </label>
+                <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    英文文章正文
+                  </label>
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <span className="text-slate-400">真题范文填入:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTitleInput('CET-4 真题精读: 现代大学教育与人工智能变革');
+                        setTextInput(`Higher education institutions are experiencing profound transformations driven by rapid technological advancements. Artificial intelligence and digital learning environments are redefining traditional classroom interactions. Faculty members must cultivate critical thinking and creative inquiry rather than mere rote memorization. Consequently, students need to develop adaptability, collaborative communication, and analytical problem-solving skills to navigate increasingly competitive and complex global career pathways.`);
+                        setMode('key_words');
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-medium transition-colors"
+                    >
+                      CET-4 真题
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTitleInput('考研英语真题精读: 经济发展与生态环境治理');
+                        setTextInput(`The debate over economic growth and environmental preservation has intensified dramatically in contemporary society. Policymakers often confront formidable challenges when attempting to balance industrial productivity with stringent ecological regulations. Empirical investigations demonstrate that technological innovation and sustainable business strategies can stimulate long-term economic prosperity without undermining natural resources. Therefore, comprehensive legislative reforms and transparent regulatory frameworks remain indispensable for achieving equitable social progress.`);
+                        setMode('key_words');
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-medium transition-colors"
+                    >
+                      考研真题
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTitleInput('雅思学术阅读: 认知神经机制与行为模式');
+                        setTextInput(`Psychological researchers have investigated how unconscious neurological mechanisms govern human decision-making and habit formation. When individuals encounter repetitive stimuli, neural pathways gradually reinforce automated behavioral patterns, reducing conscious cognitive burden. Understanding these intrinsic mechanisms enables behavioral economists and clinicians to devise targeted interventions that foster productive habits and alleviate anxiety disorders in demanding social environments.`);
+                        setMode('key_words');
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 font-medium transition-colors"
+                    >
+                      雅思精读
+                    </button>
+                  </div>
+                </div>
                 <textarea
                   rows={5}
                   value={textInput}
