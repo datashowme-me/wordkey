@@ -14,11 +14,12 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose 
     { key: 'Space (空格键)', desc: '输入词组/短语中的空格（单个单词时可用于重播发音）' },
     { key: 'Tab', desc: '立即重新播放当前单词/词组发音（美音/英音）' },
     { key: 'Ctrl + B', desc: '加入 / 取消生词本星标收藏' },
+    { key: 'Alt + Z', desc: '开启 / 退出极简沉浸专注模式 (Zen Mode)' },
     { key: 'Shift', desc: '在美式发音 (AmE) 与英式发音 (BrE) 之间快速切换' },
     { key: 'Enter / →', desc: '跳过当前单词，进入下一个单词' },
     { key: '←', desc: '返回上一个单词重新复习' },
     { key: 'Backspace', desc: '回退删除已输入的字母' },
-    { key: 'Esc', desc: '暂停 / 继续打字练习' },
+    { key: 'Esc', desc: '退出专注模式 / 暂停与继续练习' },
   ];
 
   return (

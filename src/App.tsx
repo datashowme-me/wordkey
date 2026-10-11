@@ -82,6 +82,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
   const [isTrendModalOpen, setIsTrendModalOpen] = useState<boolean>(false);
+  const [isZenMode, setIsZenMode] = useState<boolean>(false);
 
   // Mistaken words
   const [allMistakenWords, setAllMistakenWords] = useState<WordItem[]>([]);
@@ -101,14 +102,16 @@ export default function App() {
 
   // Typing Statistics
   const [stats, setStats] = useState<TypingStats>({
-    elapsedSeconds: 14,
-    totalKeystrokes: 22,
-    correctKeystrokes: 20,
-    wrongKeystrokes: 2,
-    correctWords: 1,
+    elapsedSeconds: 0,
+    totalKeystrokes: 0,
+    correctKeystrokes: 0,
+    wrongKeystrokes: 0,
+    correctWords: 0,
     wrongWords: 0,
-    wpm: 13,
-    accuracy: 91,
+    wpm: 0,
+    accuracy: 100,
+    streak: 0,
+    maxStreak: 0,
   });
 
   // Sync notebook count with storage
@@ -175,7 +178,14 @@ export default function App() {
 
       if (e.key === 'Escape') {
         e.preventDefault();
-        setIsPaused((prev) => !prev);
+        if (isZenMode) {
+          setIsZenMode(false);
+        } else {
+          setIsPaused((prev) => !prev);
+        }
+      } else if ((e.altKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+        e.preventDefault();
+        setIsZenMode((prev) => !prev);
       } else if (e.key === 'Shift' && !e.repeat) {
         // Toggle accent between AmE and BrE
         setSettings((prev) => ({
@@ -193,6 +203,7 @@ export default function App() {
     isShortcutsOpen,
     isComplete,
     isTaskMilestoneOpen,
+    isZenMode,
   ]);
 
   // Timer loop
@@ -283,9 +294,14 @@ export default function App() {
         setTaskProgressHistory((th) => [...th, newPoint]);
         setSessionProgressHistory((sh) => [...sh, newPoint]);
 
+        const nextStreak = mistakesCount === 0 ? (prev.streak || 0) + 1 : 0;
+        const nextMaxStreak = Math.max(prev.maxStreak || 0, nextStreak);
+
         return {
           ...prev,
           correctWords: nextCorrectWords,
+          streak: nextStreak,
+          maxStreak: nextMaxStreak,
         };
       });
 
@@ -492,7 +508,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col justify-between bg-[#f4f6fa] dark:bg-[#121620] text-slate-800 dark:text-slate-100 transition-colors duration-200">
-      {/* Top Header Capsule Bar (Screenshot Style) */}
+      {/* Zen Mode Minimal Hairline Progress Bar */}
+      {isZenMode && (
+        <div className="fixed top-0 left-0 right-0 z-40 h-0.5 bg-slate-200/80 dark:bg-slate-800/80">
+          <div
+            className="h-full bg-indigo-500 dark:bg-indigo-400 transition-all duration-150"
+            style={{
+              width: `${Math.round(((taskWordIndex) / Math.max(1, currentTaskWords.length)) * 100)}%`
+            }}
+          />
+        </div>
+      )}
+
+      {/* Top Header */}
       <Header
         articleTitle={articleTitle}
         currentIndex={taskWordIndex}
@@ -506,6 +534,8 @@ export default function App() {
         notebookCount={notebookCount}
         isPracticeMode={isNotebookPractice}
         isPro={membership.isPro}
+        isZenMode={isZenMode}
+        onToggleZenMode={() => setIsZenMode((prev) => !prev)}
         onOpenProModal={handleOpenProModal}
         onUpdateSettings={setSettings}
         onTogglePause={() => setIsPaused((prev) => !prev)}
@@ -519,7 +549,7 @@ export default function App() {
         onSelectTask={handleSelectTask}
       />
 
-      {/* Main Typing Center Board (Screenshot Layout) */}
+      {/* Main Typing Center Board */}
       <main className="flex-1 flex flex-col justify-center">
         <WordTypingBoard
           currentWord={currentWord}
@@ -527,6 +557,9 @@ export default function App() {
           nextWord={nextWord}
           settings={settings}
           isPaused={isPaused}
+          streak={stats.streak}
+          isZenMode={isZenMode}
+          onToggleZenMode={() => setIsZenMode((prev) => !prev)}
           onWordComplete={handleWordComplete}
           onRecordKeystroke={handleRecordKeystroke}
           onNavigatePrev={handleNavigatePrev}
@@ -540,8 +573,8 @@ export default function App() {
         />
       </main>
 
-      {/* Bottom Floating Stats Dashboard Card (Screenshot Layout) */}
-      <StatsFooter stats={stats} onOpenTrend={() => setIsTrendModalOpen(true)} />
+      {/* Bottom Floating Stats Dashboard Card */}
+      <StatsFooter stats={stats} isZenMode={isZenMode} onOpenTrend={() => setIsTrendModalOpen(true)} />
 
       {/* Modals */}
       <ArticleImportModal

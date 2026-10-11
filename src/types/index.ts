@@ -32,6 +32,8 @@ export interface TypingStats {
   wrongWords: number;
   wpm: number;
   accuracy: number;
+  streak?: number;
+  maxStreak?: number;
 }
 
 export interface TaskProgressPoint {
